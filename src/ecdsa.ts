@@ -125,7 +125,7 @@ function generatePublicKey(privateKey: bigint): [bigint, bigint]{
 
 
 // generate signature
-function signing(message: string, publicKey: [bigint, bigint], privateKey: bigint): [[bigint, bigint] , bigint]{
+function signing(message: string, publicKey: [bigint, bigint], privateKey: bigint): [bigint , bigint]{
   const messageInt = textToInt(message);
   const r = hashing(String(hashing(String(messageInt)) + messageInt)) % p;
   const R = applyDoubleAndAddMethod(base, r, a, d, p);
@@ -133,14 +133,15 @@ function signing(message: string, publicKey: [bigint, bigint], privateKey: bigin
   // % p
   const s = (r + h * privateKey);
   
-  return [R,s];
+  return [r,s];
 }
 
 // verification signature
-function verify(message: string, R: [bigint,bigint], sign: bigint, publicKey: [bigint, bigint]):boolean{
+function verify(message: string, r: bigint, sign: bigint, publicKey: [bigint, bigint]):boolean{
 
   // hashing
   const messageInt = textToInt(message);
+  const R = applyDoubleAndAddMethod(base, r, a, d, p);
   const h = hashing(String(R[0] + publicKey[0] + messageInt)) % p;
 
   // verify
@@ -158,7 +159,72 @@ function verify(message: string, R: [bigint,bigint], sign: bigint, publicKey: [b
 
 }
 
-console.log("-----------Testing Fungsional----------------");
+// Signature Encoder and Decoder
+
+function encodeSignature(r: string, s: string): Uint8Array {
+  // Convert the signature values from hexadecimal to Uint8Array format
+  const rBytes = hexToBytes(r);
+  const sBytes = hexToBytes(s);
+
+  // Calculate the total length of the signature in bytes
+  const totalLength = 6 + rBytes.length + sBytes.length;
+
+  // Allocate a new Uint8Array with the length of the signature
+  const der = new Uint8Array(totalLength);
+
+  // Encode the signature in DER format
+  der[0] = 0x30; // sequence tag
+  der[1] = totalLength - 2; // sequence length
+  der[2] = 0x02; // integer tag for r
+  der[3] = rBytes.length; // length of r
+  der.set(rBytes, 4); // r value
+  der[4 + rBytes.length] = 0x02; // integer tag for s
+  der[5 + rBytes.length] = sBytes.length; // length of s
+  der.set(sBytes, 6 + rBytes.length); // s value
+
+  // Return the binary-encoded signature as a Uint8Array
+  return der;
+}
+
+function decodeSignature(der: Uint8Array): { r: string, s: string } {
+  // Check that the input is a valid DER signature
+  if (der[0] !== 0x30 || der.length !== der[1] + 2) {
+    throw new Error('Invalid DER signature');
+  }
+
+  // Extract the values of r and s from the DER signature
+  const rStart = 4;
+  const rLength = der[3];
+  const rEnd = rStart + rLength;
+  const sStart = rEnd + 2;
+  const sLength = der[5 + rLength];
+  const sEnd = sStart + sLength;
+  const rBytes = der.slice(rStart, rEnd);
+  const sBytes = der.slice(sStart, sEnd);
+  const r = bytesToHex(rBytes);
+  const s = bytesToHex(sBytes);
+
+  // Return the decoded signature values
+  return { r, s };
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const len = hex.length / 2;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; ++i) {
+    bytes[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.prototype.map.call(bytes, x => ('00' + x.toString(16)).slice(-2)).join('');
+}
+
+
+
+
+console.log("----------- Testing Fungsional of ECDSA ----------------");
 
 console.log("--- Message ---");
 const message = "Hello World";
@@ -171,18 +237,35 @@ console.log("private key: ", privateKey);
 console.log("public key: ", publicKey);
 
 console.log("--- Signing ---");
-const signature : [[bigint, bigint] , bigint] = signing(message, publicKey, privateKey);
+const signature : [bigint , bigint] = signing(message, publicKey, privateKey);
 console.log("Signature", signature);
 
 console.log("--- Verification ---");
 const message1 = "Hello World";
-const signature1 = signature;
-const R = signature1[0];
-const sign = signature1[1];
-const valid = verify(message1, R, sign, publicKey);
+const r = signature[0];
+const s = signature[1];
+const valid = verify(message1, r, s, publicKey);
 
 if (valid){
   console.log("signature benar");
 }else{
   console.log("signature tidak benar");
 }
+
+console.log("-- bigInt toString hex --");
+const rhex = signature[0].toString(16);
+const shex = signature[1].toString(16)
+
+console.log("r: ", rhex);
+console.log("s: ", shex);
+
+console.log("----------- Testing Fungsional of Signature Encoder ----------------");
+
+// const r = '1e4c4e9684aa4b7e524e9d29c48cd8f11241d0740dc778dfe107dce7e8ec72f8';
+// const s = '9b9d90c3bb2a1a41d52727d23c54fc8e7a407a4fc4cc4fc4a4f8a07c34b4eb2c';
+
+const signatureEnc = encodeSignature(rhex, shex);
+console.log(signatureEnc);
+
+const decodedSignature = decodeSignature(signatureEnc);
+console.log(decodedSignature);
