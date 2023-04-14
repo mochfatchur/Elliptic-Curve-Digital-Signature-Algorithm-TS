@@ -1,76 +1,188 @@
-// import crypto from "crypto";
-// import { createHash } from "crypto";
+import { sha512 } from 'js-sha512';
 
-// type Point = [bigint, bigint];
+// curve : ax^2 + y^2  = 1 + dx^2y^2
+// ed25519
 
-// interface Curve {
-//   a: bigint;
-//   b: bigint;
-//   p: bigint;
-//   G: Point;
-//   n: bigint;
-// }
+const base: [bigint, bigint] = [
+  15112221349535400772501151409588531511454012693041857206046113283949847762202n,
+  46316835694926478169428394003475163141307993866256225615783033603165251855960n,
+];
+const p: bigint = 2n ** 255n - 19n;
+const a = BigInt(-1);
+const d = findPositiveModulus(BigInt(-121665) * findModInverse(121666n, p)!, p);
 
-// interface Signature {
-//   r: bigint;
-//   s: bigint;
-// }
 
-// const secp256k1: Curve = {
-//     a: BigInt(0x0000000000000000000000000000000000000000000000000000000000000000),
-//     b: BigInt(0x0000000000000000000000000000000000000000000000000000000000000007),
-//     p: BigInt("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F"),
-//     G: [
-//       BigInt("0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798"),
-//       BigInt("0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8"),
-//     ] as Point,
-//     n: BigInt("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141"),
-// };
 
-// function mod(n: bigint, m: bigint): bigint {
-//     return ((n % m) + m) % m;
-// }
+function findPositiveModulus(a: bigint, p: bigint): bigint {
+  if (a < 0n) {
+    a = (a + p * BigInt(Math.floor(Math.abs(Number(a)) / Number(p))) + p) % p;
+  }
+  return a;
+}
 
-// function modInverse(a: bigint, m: bigint): bigint {
-//     let [old_r, r] = [a, m];
-//     let [old_t, t] = [0n, 1n];
-  
-//     while (r !== 0n) {
-//       const q = old_r / r;
-//       [old_r, r] = [r, old_r - q * r];
-//       [old_t, t] = [t, old_t - q * t];
-//     }
-  
-//     if (old_r !== 1n) {
-//       throw new Error(`${a} and ${m} are not coprime`);
-//     }
-  
-//     return old_t >= 0n ? old_t : old_t + m;
-// }
+function textToInt(text: string): bigint {
+  const encodedText: Uint8Array = new TextEncoder().encode(text);
+  const hexText: string = Array.prototype.map
+    .call(encodedText, (x: number) => ('00' + x.toString(16)).slice(-2))
+    .join('');
+  const intText: bigint = BigInt('0x' + hexText);
+  return intText;
+}
 
-// function add(curve: Curve, p: Point, q: Point): Point {
-//     const [px, py] = p;
-//     const [qx, qy] = q;
-  
-//     if (px === qx && py === qy) {
-//       return double(curve, p);
-//     }
-  
-//     const s = ((qy - py) * modInverse(qx - px, curve.p)) % curve.p;
-//     const x = (s * s - px - qx) % curve.p;
-//     const y = (s * (px - x) - py) % curve.p;
-//     return [x, y] as const;
-// }
+function gcd(a: bigint, b: bigint): bigint {
+  while (a !== 0n) {
+    [a, b] = [b % a, a];
+  }
+  return b;
+}
 
-// function double(curve: Curve, p: Point): Point {
-//     const [px, py] = p;
-//     const s = ((3n * px * px + curve.a) * modInverse(2n * py, curve.p)) % curve.p;
-//     const x = (s * s - 2n * px) % curve.p;
-//     const y = (s * (px - x) - py) % curve.p;
-//     return [x, y] as const;
-// }
+function findModInverse(a: bigint, m: bigint): bigint | null {
+  if (a < 0n) {
+    a = (a % m + m) % m; // ensure that a is smaller than m
+    a = (a + m * BigInt(Math.floor(Math.abs(Number(a)) / Number(m))) + m) % m;
+  }
+  // no mod inverse if a & m aren't relatively prime
+  if (gcd(a, m) !== 1n) {
+    return null;
+  }
+  // Calculate using the Extended Euclidean Algorithm:
+  let u1: bigint = 1n,
+    u2: bigint = 0n,
+    u3: bigint = a,
+    v1: bigint = 0n,
+    v2: bigint = 1n,
+    v3: bigint = m;
 
+  while (v3 !== 0n) {
+    const q: bigint = u3 / v3;
+    [v1, v2, v3, u1, u2, u3] = [
+      u1 - q * v1,
+      u2 - q * v2,
+      u3 - q * v3,
+      v1,
+      v2,
+      v3,
+    ];
+  }
+
+  return findPositiveModulus(u1, m);
+}
+
+
+function applyDoubleAndAddMethod(P: [bigint, bigint], k: bigint, a: bigint, d: bigint, mod: bigint): [bigint, bigint] {
+  let additionPoint: [bigint, bigint] = [P[0], P[1]];
+  const kAsBinary: string = k.toString(2); // Convert k to binary
   
+  for (let i = 1; i < kAsBinary.length; i++) {
+    const currentBit = kAsBinary.charAt(i);
+
+    // always apply doubling
+    additionPoint = pointAddition(additionPoint, additionPoint, a, d, mod);
+
+    if (currentBit === '1') {
+      // add base point
+      additionPoint = pointAddition(additionPoint, P, a, d, mod);
+    }
+  }
+
+  return additionPoint;
+}
+
+function pointAddition(P: [bigint, bigint], Q: [bigint, bigint], a: bigint, d: bigint, mod: bigint): [bigint, bigint] {
+  const x1: bigint = P[0];
+  const y1: bigint = P[1];
+  const x2: bigint = Q[0];
+  const y2: bigint = Q[1];
+
+  const u: bigint = 1n + d * x1 * x2 * y1 * y2;
+  const v: bigint = 1n - d * x1 * x2 * y1 * y2;
+  const uInverse: bigint | null = findModInverse(u, mod);
+  const vInverse: bigint | null = findModInverse(v, mod);
+
+  if (uInverse === null || vInverse === null) {
+    throw new Error("Cannot calculate point addition: invalid input");
+  }
+
+  const x3: bigint = ((x1 * y2 + y1 * x2) % mod) * uInverse % mod;
+  const y3: bigint = ((y1 * y2 - a * x1 * x2) % mod) * vInverse % mod;
+
+  return [x3, y3];
+}
+
+
+// hashing the message
+function hashing(message: string): bigint {
+  const hash = sha512(message);
+  const bigIntHash = BigInt('0x' + hash);
+  return bigIntHash;
+}
+
+// generate public key
+function generatePublicKey(privateKey: bigint): [bigint, bigint]{
+  const publicKey = applyDoubleAndAddMethod(base, privateKey, a, d, p);
+  return publicKey;
+}
+
+
+// generate signature
+function signing(message: string, publicKey: [bigint, bigint], privateKey: bigint): [[bigint, bigint] , bigint]{
+  const messageInt = textToInt(message);
+  const r = hashing(String(hashing(String(messageInt)) + messageInt)) % p;
+  const R = applyDoubleAndAddMethod(base, r, a, d, p);
+  const h = hashing(String(R[0] + publicKey[0] + messageInt)) % p;
+  // % p
+  const s = (r + h * privateKey);
   
+  return [R,s];
+}
+
+// verification signature
+function verify(message: string, R: [bigint,bigint], sign: bigint, publicKey: [bigint, bigint]):boolean{
+
+  // hashing
+  const messageInt = textToInt(message);
+  const h = hashing(String(R[0] + publicKey[0] + messageInt)) % p;
+
+  // verify
+  const P1 = applyDoubleAndAddMethod(base, sign, a, d, p);
+
+  const P2 = pointAddition(R, applyDoubleAndAddMethod(publicKey, h, a, d, p), a, d, p);
   
-  
+  // checking
+  if (P1[0] == P2[0] && P1[1] == P2[1]) {
+    // Signature is valid
+    return true;
+  }
+  // Signature violation detected
+  return false;
+
+}
+
+console.log("-----------Testing Fungsional----------------");
+
+console.log("--- Message ---");
+const message = "Hello World";
+console.log("Message: ", message);
+
+console.log("--- Key ---");
+const privateKey: bigint = 47379675103498394144858916095175689n;
+const publicKey: [bigint,bigint] = generatePublicKey(privateKey);
+console.log("private key: ", privateKey);
+console.log("public key: ", publicKey);
+
+console.log("--- Signing ---");
+const signature : [[bigint, bigint] , bigint] = signing(message, publicKey, privateKey);
+console.log("Signature", signature);
+
+console.log("--- Verification ---");
+const message1 = "Hello World";
+const signature1 = signature;
+const R = signature1[0];
+const sign = signature1[1];
+const valid = verify(message1, R, sign, publicKey);
+
+if (valid){
+  console.log("signature benar");
+}else{
+  console.log("signature tidak benar");
+}
