@@ -4,9 +4,9 @@
     "@types/node": "^18.15.11"
   },
   "dependencies": {
-    "@types/js-sha512": "^0.8.0",
-    "@types/random": "^3.0.1",
+    "@types/seedrandom": "^3.0.5",
     "big-integer": "^1.6.51",
-    "crypto-js": "^4.1.1"
+    "crypto-js": "^4.1.1",
+    "seedrandom": "^3.0.5"
   }
 }
